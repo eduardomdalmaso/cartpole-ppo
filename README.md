@@ -16,13 +16,14 @@ Este projeto treina um agente de inteligência artificial para balancear um post
 ## 📁 Estrutura do Projeto
 
 ```
-├── train_cartpole.py      # Script principal de treinamento com MLflow
-├── agent-cart.py          # Script de demonstração com ação aleatória
+├── train_ppo.py           # Script de treinamento com PPO e MLflow
+├── agent-cart.py          # Script de demonstração com ações aleatórias
 ├── requeriments.txt       # Dependências do projeto
 ├── README.md              # Este arquivo
+├── LICENSE                # Licença MIT
+├── .gitignore             # Arquivo de configuração git
 ├── mlruns/                # Histórico de execuções do MLflow
-├── models/                # Modelos treinados armazenados
-└── video/                 # Vídeos de demonstração (se aplicável)
+└── video/                 # Vídeos gerados (se aplicável)
 ```
 
 ## 🛠️ Requisitos
@@ -58,15 +59,25 @@ pip install "gymnasium[classic-control]"
 Execute o script de treinamento:
 
 ```bash
-python train_cartpole.py
+python train_ppo.py
 ```
 
+Customizar parâmetros:
+
+```bash
+python train_ppo.py --timesteps 50000 --eval-episodes 50 --name "meu_experimento"
+```
+
+**Parâmetros:**
+- `--timesteps`: Número de timesteps de treinamento (padrão: 100000)
+- `--eval-episodes`: Número de episódios para avaliação (padrão: 50)
+- `--name`: Nome do experimento no MLflow (opcional)
+
 Este script irá:
-- Criar um ambiente CartPole
-- Treinar um modelo PPO por 100.000 timesteps
-- Avaliar o modelo em 50 episódios
+- Treinar um modelo PPO
+- Avaliar o modelo em N episódios
 - Registrar métricas no MLflow
-- Salvar o modelo treinado
+- Exibir resultados no console
 
 ### Demonstração com Ação Aleatória
 
@@ -75,8 +86,6 @@ Para ver o ambiente funcionando com ações aleatórias:
 ```bash
 python agent-cart.py
 ```
-
-Este script executa episódios com ações aleatórias até atingir uma recompensa de 80 pontos.
 
 ## 📊 Métricas e Rastreamento
 
@@ -88,13 +97,16 @@ O projeto utiliza **MLflow** para rastrear:
 - Recompensa máxima (max_reward)
 - Recompensa mínima (min_reward)
 
-Visualize o histórico de execuções:
+**Visualizar histórico de execuções:**
 
 ```bash
 mlflow ui
 ```
 
-Então acesse `http://localhost:5000` no seu navegador.
+Acesse `http://localhost:5000` para ver:
+- Comparação de todos os experimentos
+- Gráficos de desempenho
+- Parâmetros de cada execução
 
 ## 🎮 Ambiente CartPole
 
@@ -112,12 +124,17 @@ Um agente bem treinado deve atingir:
 
 ## 🔧 Personalização
 
-Para modificar os parâmetros de treinamento, edite `train_cartpole.py`:
+Para modificar os parâmetros de treinamento, use as opções de linha de comando:
 
-```python
-timesteps = 100_000      # Número de timesteps de treinamento
-eval_episodes = 50       # Número de episódios para avaliação
+```bash
+# 50k timesteps
+python train_ppo.py --timesteps 50000 --name "ppo_50k"
+
+# 200k timesteps com mais episódios de avaliação
+python train_ppo.py --timesteps 200000 --eval-episodes 100 --name "ppo_200k"
 ```
+
+Ou edite diretamente em `train_ppo.py` os valores padrão.
 
 ## 📚 Referências
 
