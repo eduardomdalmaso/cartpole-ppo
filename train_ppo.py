@@ -23,33 +23,33 @@ def train_ppo_cartpole(timesteps=100_000, eval_episodes=50, run_name=None):
     
     # Iniciar MLflow e definir experimento
     mlflow.set_experiment("CartPole-RL")
-    
+
     # Gerar nome automático se não fornecido
     if run_name is None:
         run_name = f"ppo_cartpole_{timesteps}steps_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    with mlflow.start_run(run_name=run_name):
-        run_id = mlflow.active_run().info.run_id
-        
+
+    with mlflow.start_run(run_name=run_name) as active_run:
+        run_id = active_run.info.run_id
+
         # Registrar parâmetros
         mlflow.log_param("algorithm", "PPO")
         mlflow.log_param("timesteps", timesteps)
         mlflow.log_param("eval_episodes", eval_episodes)
         mlflow.log_param("environment", "CartPole-v1")
-        
+
         print(f"\n{'='*60}")
         print(f"Treinando: {run_name}")
         print(f"Timesteps: {timesteps}")
         print(f"Episódios de avaliação: {eval_episodes}")
         print(f"{'='*60}\n")
-        
+
         # Criar ambiente e modelo
         env = gym.make("CartPole-v1")
         model = PPO("MlpPolicy", env, verbose=0)
-        
-        # Treinar agente
+
+        # Treinar agente (normalmente chamaremos por checkpoints fora desta função)
         model.learn(total_timesteps=timesteps)
-        
+
         # Avaliar agente
         test_env = gym.make("CartPole-v1")
         rewards = []
@@ -65,16 +65,16 @@ def train_ppo_cartpole(timesteps=100_000, eval_episodes=50, run_name=None):
             rewards.append(total_reward)
             if (episode + 1) % 10 == 0:
                 print(f"Avaliação: {episode + 1}/{eval_episodes} - Recompensa: {total_reward}")
-        
+
         avg_reward = sum(rewards) / len(rewards)
         max_reward = max(rewards)
         min_reward = min(rewards)
-        
+
         # Logar métricas no MLflow
         mlflow.log_metric("avg_reward", avg_reward)
         mlflow.log_metric("max_reward", max_reward)
         mlflow.log_metric("min_reward", min_reward)
-        
+
         # Exibir resultados
         print(f"\n{'='*60}")
         print(f"Treinamento Concluído!")
@@ -82,7 +82,7 @@ def train_ppo_cartpole(timesteps=100_000, eval_episodes=50, run_name=None):
         print(f"Recompensa Máxima: {max_reward:.2f}")
         print(f"Recompensa Mínima: {min_reward:.2f}")
         print(f"{'='*60}\n")
-        
+
         return model, {
             'run_name': run_name,
             'timesteps': timesteps,
@@ -261,6 +261,125 @@ def train_multiple_agents(configs):
         })
     
     return agents
+
+
+def train_with_checkpoints(timesteps=100_000, checkpoint=10_000, eval_episodes=5, video_steps=500, run_name=None, target_reward=490):
+    """
+    Treina um único agente em checkpoints, avalia em cada checkpoint, grava vídeo por checkpoint
+    e gera um vídeo final mostrando a evolução.
+    """
+    mlflow.set_experiment("CartPole-RL")
+    if run_name is None:
+        run_name = f"ppo_evolution_{timesteps}steps_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    with mlflow.start_run(run_name=run_name) as active_run:
+        run_id = active_run.info.run_id
+        mlflow.log_param("algorithm", "PPO")
+        mlflow.log_param("total_timesteps", timesteps)
+        mlflow.log_param("checkpoint", checkpoint)
+        mlflow.log_param("eval_episodes", eval_episodes)
+
+        env = gym.make("CartPole-v1")
+        model = PPO("MlpPolicy", env, verbose=0)
+
+        videos_dir = Path("videos/evolution")
+        videos_dir.mkdir(parents=True, exist_ok=True)
+
+        checkpoints = list(range(checkpoint, timesteps + 1, checkpoint))
+        solved_at = None
+
+        for ck in checkpoints:
+            print(f"\n-- Training until {ck} timesteps (increment {checkpoint}) --")
+            model.learn(total_timesteps=checkpoint)
+
+            # Evaluate
+            eval_env = gym.make("CartPole-v1")
+            rewards = []
+            for ep in range(eval_episodes):
+                obs, info = eval_env.reset()
+                done = False
+                total_reward = 0
+                while not done:
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, terminated, truncated, info = eval_env.step(action)
+                    total_reward += reward
+                    done = terminated or truncated
+                rewards.append(total_reward)
+
+            avg_reward = float(np.mean(rewards))
+            max_reward = float(np.max(rewards))
+            min_reward = float(np.min(rewards))
+
+            # Log metrics with step as key
+            mlflow.log_metric("avg_reward", avg_reward, step=ck)
+            mlflow.log_metric("max_reward", max_reward, step=ck)
+            mlflow.log_metric("min_reward", min_reward, step=ck)
+
+            print(f"Checkpoint {ck}: avg={avg_reward:.2f} max={max_reward:.2f} min={min_reward:.2f}")
+
+            # record a short video for this checkpoint
+            # use RecordVideo to write a single episode video
+            from gymnasium.wrappers import RecordVideo
+            rec_env = gym.make("CartPole-v1", render_mode="rgb_array")
+            rec_env = RecordVideo(rec_env, video_folder=str(videos_dir), name_prefix=f"evolution_{ck}", episode_trigger=lambda x: True)
+            obs, info = rec_env.reset()
+            done = False
+            step = 0
+            while step < video_steps and not done:
+                action, _ = model.predict(obs, deterministic=True)
+                obs, reward, terminated, truncated, info = rec_env.step(action)
+                done = terminated or truncated
+                step += 1
+            rec_env.close()
+
+            # RecordVideo writes files named like 'evolution_{ck}-episode-0.mp4'
+            # Find the generated file
+            gen_files = list(videos_dir.glob(f"evolution_{ck}*.mp4"))
+            if gen_files:
+                gen = gen_files[-1]
+                # rename to standardized name
+                target = videos_dir / f"evolution_{ck}.mp4"
+                if gen != target:
+                    gen.replace(target)
+                mlflow.log_artifact(str(target), artifact_path=f"videos/{ck}")
+
+            # convergence logging
+            if solved_at is None and avg_reward >= target_reward:
+                solved_at = ck
+                mlflow.log_metric("timesteps_to_solve", float(ck))
+
+        # After all checkpoints, create a combined video ordering by checkpoints
+        per_ck_videos = sorted(videos_dir.glob("evolution_*.mp4"), key=lambda p: int(p.stem.split("_")[1]))
+        final_video = Path("videos") / f"evolution_{run_name}.mp4"
+
+        # combine sequentially (concatenate frames)
+        if per_ck_videos:
+            # read first to get frame size
+            cap0 = cv2.VideoCapture(str(per_ck_videos[0]))
+            ret0, frame0 = cap0.read()
+            cap0.release()
+            if not ret0:
+                print("Could not read checkpoint video frames; skipping final composition.")
+            else:
+                h, w = frame0.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                out = cv2.VideoWriter(str(final_video), fourcc, 30, (w, h))
+                for v in per_ck_videos:
+                    cap = cv2.VideoCapture(str(v))
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        out.write(frame)
+                    cap.release()
+                out.release()
+                mlflow.log_artifact(str(final_video), artifact_path="videos")
+
+        print(f"Final evolution video: {final_video}")
+        if solved_at is not None:
+            print(f"Solved at {solved_at} timesteps (logged to MLflow)")
+
+        return str(final_video)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Treinar múltiplos PPO Agents para CartPole")
